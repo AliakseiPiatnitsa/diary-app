@@ -1,41 +1,26 @@
-import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 
 export async function middleware(request) {
-  let supabaseResponse = NextResponse.next({ request })
+  const { pathname } = request.nextUrl
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    {
-      cookies: {
-        getAll() { return request.cookies.getAll() },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({ request })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
+  // Supabase хранит сессию в cookie с паттерном sb-*-auth-token
+  // Проверяем его наличие без вызова Supabase SDK (SDK не работает в Edge Runtime)
+  const cookies = request.cookies.getAll()
+  const hasSession = cookies.some(
+    c => c.name.startsWith('sb-') && c.name.endsWith('-auth-token')
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
-
-  if (!user && request.nextUrl.pathname.startsWith('/journal')) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/login'
-    return NextResponse.redirect(url)
+  // Не залогинен и пытается открыть /journal → на /login
+  if (!hasSession && pathname.startsWith('/journal')) {
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  if (user && request.nextUrl.pathname === '/login') {
-    const url = request.nextUrl.clone()
-    url.pathname = '/journal'
-    return NextResponse.redirect(url)
+  // Уже залогинен и открывает /login → на /journal
+  if (hasSession && pathname === '/login') {
+    return NextResponse.redirect(new URL('/journal', request.url))
   }
 
-  return supabaseResponse
+  return NextResponse.next()
 }
 
 export const config = {
